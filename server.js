@@ -24,28 +24,52 @@ const verifyToken = (req, res, next) => {
 };
 
 // ✅ Auth API
+// 📌 **1. ลงทะเบียนลูกค้า**
 app.post("/api/register", (req, res) => {
-  const { FullName, Email, Password } = req.body;
-  bcrypt.hash(Password, 10, (err, hash) => {
-    if (err) throw err;
-    db.query("INSERT INTO Customer (FullName, Email, Password) VALUES (?, ?, ?)", [FullName, Email, hash], (error) => {
-      if (error) res.status(500).json({ error });
-      else res.json({ message: "✅ Register Success" });
-    });
+  const { fullName, email, password } = req.body;
+  const hashPassword = bcrypt.hashSync(password, 8);
+
+  db.query("INSERT INTO Customer (FullName, Email, Password) VALUES (?, ?, ?)", [fullName, email, hashPassword], (err, result) => {
+      if (err) return res.status(500).json({ error: err.message });
+      res.json({ message: "Customer registered successfully" });
   });
 });
 
+// 📌 **2. Login**
 app.post("/api/login", (req, res) => {
-  const { Email, Password } = req.body;
-  db.query("SELECT * FROM Customer WHERE Email = ?", [Email], (err, result) => {
-    if (err || result.length === 0) return res.status(401).json({ message: "❌ Invalid Credentials" });
+  const { email, password } = req.body;
 
-    bcrypt.compare(Password, result[0].Password, (error, isMatch) => {
-      if (!isMatch) return res.status(401).json({ message: "❌ Invalid Credentials" });
+  if (!email || !password) {
+      return res.status(400).json({ message: "Email and password are required" });
+  }
 
-      const token = jwt.sign({ CustomerID: result[0].CustomerID }, SECRET_KEY, { expiresIn: "1h" });
-      res.json({ token });
-    });
+  db.query("SELECT * FROM Customer WHERE Email = ?", [email], (err, result) => {
+      if (err) {
+          return res.status(500).json({ message: "Database error", error: err });
+      }
+
+      if (result.length === 0) {
+          return res.status(401).json({ message: "Invalid email or password" });
+      }
+
+      const user = result[0];
+      const hashedPassword = user.Password;
+
+      // ตรวจสอบว่ารหัสผ่านถูกต้องหรือไม่
+      bcrypt.compare(password, hashedPassword, (err, isMatch) => {
+          if (err || !isMatch) {
+              return res.status(401).json({ message: "Invalid email or password" });
+          }
+
+          // สร้าง JWT Token
+          const token = jwt.sign(
+              { id: user.CustomerID, email: user.Email },
+              SECRET_KEY,
+              { expiresIn: "2h" }
+          );
+
+          res.json({ message: "Login successful", token });
+      });
   });
 });
 
