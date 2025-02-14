@@ -7,7 +7,15 @@ const db = require("./database");
 
 const app = express();
 app.use(bodyParser.json());
-app.use(cors());
+// อนุญาตทุกโดเมน (ไม่ปลอดภัยสำหรับ production)
+app.use(cors()); 
+
+// หรือกำหนด origin ที่อนุญาตเฉพาะ
+app.use(cors({
+  origin: "http://localhost:3000", // เปลี่ยนเป็นโดเมนของ frontend
+  methods: ["GET", "POST", "PUT", "DELETE"], // กำหนด HTTP methods ที่อนุญาต
+  allowedHeaders: ["Content-Type", "Authorization"], // กำหนด headers ที่อนุญาต
+}));
 
 const SECRET_KEY = "IT4501"; // ไม่ใช้ .env
 
@@ -74,15 +82,15 @@ app.post("/api/login", (req, res) => {
 });
 
 // ✅ Products API
-app.get('/api/products', (req, res) => {
-  const query = 'SELECT * FROM product'; // ใช้คำสั่ง SQL เพื่อดึงข้อมูลสินค้า
-  db.query(query, (err, results) => {
-    if (err) {
-      return res.status(500).json({ message: 'Database error', error: err });
-    }
-    res.status(200).json({ products: results });
+app.get("/api/products", (req, res) => {
+  db.query("SELECT * FROM Product", (err, results) => {
+    if (err) return res.status(500).json({ error: err.message });
+
+    console.log("Database Response:", results);
+    res.json(results); // ต้องแน่ใจว่าเป็น Array
   });
 });
+
 
 
 app.get("/api/products/:id", (req, res) => {
@@ -148,7 +156,7 @@ app.get('/api/orders/:id', (req, res) => {
     if (orderResult.length === 0) {
       return res.status(404).json({ message: 'Order not found' });
     }
-    const orderDetailsQuery = 'SELECT * FROM order_detail WHERE OrderID = ?';
+    const orderDetailsQuery = 'SELECT * FROM orderdetail WHERE OrderID = ?';
     db.query(orderDetailsQuery, [OrderID], (err, orderDetails) => {
       if (err) {
         return res.status(500).json({ message: 'Error fetching order details', error: err });
