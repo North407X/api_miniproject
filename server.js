@@ -26,10 +26,10 @@ const verifyToken = (req, res, next) => {
 // ✅ Auth API
 // 📌 **1. ลงทะเบียนลูกค้า**
 app.post("/api/register", (req, res) => {
-  const { fullName, email, password } = req.body;
+  const { fullName, email, password, phone, address} = req.body;
   const hashPassword = bcrypt.hashSync(password, 8);
 
-  db.query("INSERT INTO Customer (FullName, Email, Password) VALUES (?, ?, ?)", [fullName, email, hashPassword], (err, result) => {
+  db.query("INSERT INTO Customer (FullName, Email, Password, Phone, Address) VALUES (?, ?, ?, ?, ?)", [fullName, email, hashPassword, phone, address], (err, result) => {
       if (err) return res.status(500).json({ error: err.message });
       res.json({ message: "Customer registered successfully" });
   });
@@ -74,12 +74,16 @@ app.post("/api/login", (req, res) => {
 });
 
 // ✅ Products API
-app.get("/api/products", (req, res) => {
-  db.query("SELECT * FROM Product", (err, result) => {
-    if (err) throw err;
-    res.json(result);
+app.get('/api/products', (req, res) => {
+  const query = 'SELECT * FROM product'; // ใช้คำสั่ง SQL เพื่อดึงข้อมูลสินค้า
+  db.query(query, (err, results) => {
+    if (err) {
+      return res.status(500).json({ message: 'Database error', error: err });
+    }
+    res.status(200).json({ products: results });
   });
 });
+
 
 app.get("/api/products/:id", (req, res) => {
   db.query("SELECT * FROM Product WHERE ProductID = ?", [req.params.id], (err, result) => {
@@ -88,98 +92,94 @@ app.get("/api/products/:id", (req, res) => {
   });
 });
 
-app.post("/api/products", verifyToken, (req, res) => {
-  const { ProductName, Price, Stock } = req.body;
-  db.query("INSERT INTO Product (ProductName, Price, Stock) VALUES (?, ?, ?)", [ProductName, Price, Stock], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Product Added" });
+app.post('/api/cart', (req, res) => {
+  const { ProductID, Quantity, UserID } = req.body;
+  const query = 'INSERT INTO cart (UserID, ProductID, Quantity) VALUES (?, ?, ?)';
+  db.query(query, [UserID, ProductID, Quantity], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: 'Error adding product to cart', error: err });
+    }
+    res.status(200).json({ message: 'Product added to cart', cart_item: result });
   });
 });
 
-app.put("/api/products/:id", verifyToken, (req, res) => {
-  const { ProductName, Price, Stock } = req.body;
-  db.query("UPDATE Product SET ProductName=?, Price=?, Stock=? WHERE ProductID=?", 
-  [ProductName, Price, Stock, req.params.id], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Product Updated" });
+app.get('/api/cart', (req, res) => {
+  const UserID = req.query.UserID; // รับ UserID จาก query string
+  const query = 'SELECT * FROM cart WHERE UserID = ?';
+  db.query(query, [UserID], (err, results) => {
+    if (err) {
+      return res.status(500).json({ message: 'Database error', error: err });
+    }
+    res.status(200).json({ cart_items: results });
   });
 });
 
-app.delete("/api/products/:id", verifyToken, (req, res) => {
-  db.query("DELETE FROM Product WHERE ProductID = ?", [req.params.id], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Product Deleted" });
+app.post('/api/orders', (req, res) => {
+  const { CustomerID, TotalPrice, CartItems } = req.body;
+  // สร้างคำสั่งซื้อใหม่ในตาราง orders
+  const query = 'INSERT INTO orders (CustomerID, TotalPrice) VALUES (?, ?)';
+  db.query(query, [CustomerID, TotalPrice], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: 'Error creating order', error: err });
+    }
+    const OrderID = result.insertId;
+
+    // เพิ่มรายการสินค้าที่สั่งในตาราง order_details
+    CartItems.forEach((item) => {
+      const orderDetailQuery = 'INSERT INTO order_detail (OrderID, ProductID, Quantity, Subtotal) VALUES (?, ?, ?, ?)';
+      db.query(orderDetailQuery, [OrderID, item.ProductID, item.Quantity, item.Subtotal], (err) => {
+        if (err) {
+          return res.status(500).json({ message: 'Error adding order details', error: err });
+        }
+      });
+    });
+
+    res.status(200).json({ message: 'Order created successfully', order_id: OrderID });
   });
 });
 
-// ✅ Orders API
-app.get("/api/orders", verifyToken, (req, res) => {
-  db.query("SELECT * FROM `Order` WHERE CustomerID = ?", [req.CustomerID], (err, result) => {
-    if (err) throw err;
-    res.json(result);
+app.get('/api/orders/:id', (req, res) => {
+  const OrderID = req.params.id;
+  const query = 'SELECT * FROM orders WHERE OrderID = ?';
+  db.query(query, [OrderID], (err, orderResult) => {
+    if (err) {
+      return res.status(500).json({ message: 'Error fetching order', error: err });
+    }
+    if (orderResult.length === 0) {
+      return res.status(404).json({ message: 'Order not found' });
+    }
+    const orderDetailsQuery = 'SELECT * FROM order_detail WHERE OrderID = ?';
+    db.query(orderDetailsQuery, [OrderID], (err, orderDetails) => {
+      if (err) {
+        return res.status(500).json({ message: 'Error fetching order details', error: err });
+      }
+      res.status(200).json({
+        order: orderResult[0],
+        order_details: orderDetails
+      });
+    });
   });
 });
 
-app.post("/api/orders", verifyToken, (req, res) => {
-  const { OrderDate } = req.body;
-  db.query("INSERT INTO `Order` (OrderDate, CustomerID) VALUES (?, ?)", [OrderDate, req.CustomerID], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Order Created" });
+app.post('/api/payments', (req, res) => {
+  const { OrderID, PaymentMethod, Amount } = req.body;
+  const query = 'INSERT INTO payment (OrderID, PaymentMethod, Amount) VALUES (?, ?, ?)';
+  db.query(query, [OrderID, PaymentMethod, Amount], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: 'Error processing payment', error: err });
+    }
+    res.status(200).json({ message: 'Payment processed successfully', payment_id: result.insertId });
   });
 });
 
-app.put("/api/orders/:id", verifyToken, (req, res) => {
-  const { Status } = req.body;
-  db.query("UPDATE `Order` SET Status = ? WHERE OrderID = ?", [Status, req.params.id], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Order Updated" });
-  });
-});
-
-app.delete("/api/orders/:id", verifyToken, (req, res) => {
-  db.query("DELETE FROM `Order` WHERE OrderID = ?", [req.params.id], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Order Cancelled" });
-  });
-});
-
-// ✅ Payments API
-app.get("/api/payments", verifyToken, (req, res) => {
-  db.query("SELECT * FROM Payment", (err, result) => {
-    if (err) throw err;
-    res.json(result);
-  });
-});
-
-app.post("/api/payments", verifyToken, (req, res) => {
-  const { OrderID, Amount } = req.body;
-  db.query("INSERT INTO Payment (OrderID, Amount) VALUES (?, ?)", [OrderID, Amount], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Payment Recorded" });
-  });
-});
-
-// ✅ Shipping API
-app.get("/api/shipping", verifyToken, (req, res) => {
-  db.query("SELECT * FROM Shipping", (err, result) => {
-    if (err) throw err;
-    res.json(result);
-  });
-});
-
-app.post("/api/shipping", verifyToken, (req, res) => {
-  const { OrderID, Status } = req.body;
-  db.query("INSERT INTO Shipping (OrderID, Status) VALUES (?, ?)", [OrderID, Status], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Shipping Created" });
-  });
-});
-
-app.put("/api/shipping/:id", verifyToken, (req, res) => {
-  const { Status } = req.body;
-  db.query("UPDATE Shipping SET Status = ? WHERE ShippingID = ?", [Status, req.params.id], (err) => {
-    if (err) throw err;
-    res.json({ message: "✅ Shipping Updated" });
+app.get('/api/payments/:id', (req, res) => {
+  const PaymentID = req.params.id;
+  const query = 'SELECT * FROM payment WHERE PaymentID = ?';
+  db.query(query, [PaymentID], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: 'Error fetching payment status', error: err });
+    }
+    res.status(200).json(result[0]);
   });
 });
 
