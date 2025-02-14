@@ -7,8 +7,6 @@ const db = require("./database");
 
 const app = express();
 app.use(bodyParser.json());
-// อนุญาตทุกโดเมน (ไม่ปลอดภัยสำหรับ production)
-app.use(cors()); 
 
 // หรือกำหนด origin ที่อนุญาตเฉพาะ
 app.use(cors({
@@ -17,10 +15,10 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"], // กำหนด headers ที่อนุญาต
 }));
 
-const SECRET_KEY = "IT4501"; // ไม่ใช้ .env
+const SECRET_KEY = "IT_lannapoly_cnx"; // ไม่ใช้ .env
 
 // Middleware สำหรับตรวจสอบ JWT Token
-const verifyToken = (req, res, next) => {
+const authenticate = (req, res, next) => {
   const token = req.headers["authorization"];
   if (!token) return res.status(403).json({ message: "❌ No Token Provided" });
 
@@ -81,80 +79,63 @@ app.post("/api/login", (req, res) => {
   });
 });
 
-// ✅ Products API
-app.get("/api/products", (req, res) => {
-  db.query("SELECT * FROM Product", (err, results) => {
-    if (err) return res.status(500).json({ error: err.message });
-
-    console.log("Database Response:", results);
-    res.json(results); // ต้องแน่ใจว่าเป็น Array
-  });
-});
-
-
-
-app.get("/api/products/:id", (req, res) => {
-  db.query("SELECT * FROM Product WHERE ProductID = ?", [req.params.id], (err, result) => {
-    if (err) throw err;
-    res.json(result[0]);
-  });
-});
-
-app.post('/api/cart', (req, res) => {
-  const { ProductID, Quantity, UserID } = req.body;
-  const query = 'INSERT INTO cart (UserID, ProductID, Quantity) VALUES (?, ?, ?)';
-  db.query(query, [UserID, ProductID, Quantity], (err, result) => {
-    if (err) {
-      return res.status(500).json({ message: 'Error adding product to cart', error: err });
-    }
-    res.status(200).json({ message: 'Product added to cart', cart_item: result });
-  });
-});
-
-app.get('/api/cart', (req, res) => {
-  const UserID = req.query.UserID; // รับ UserID จาก query string
-  const query = 'SELECT * FROM cart WHERE UserID = ?';
-  db.query(query, [UserID], (err, results) => {
+// GET all products
+app.get('/api/products', (req, res) => {
+  const query = 'SELECT * FROM Product';
+  db.query(query, (err, results) => {
     if (err) {
       return res.status(500).json({ message: 'Database error', error: err });
     }
-    res.status(200).json({ cart_items: results });
+    res.json({ products: results });
   });
 });
 
-app.post('/api/orders', (req, res) => {
-  const { CustomerID, TotalPrice, CartItems } = req.body;
-  // สร้างคำสั่งซื้อใหม่ในตาราง orders
-  const query = 'INSERT INTO orders (CustomerID, TotalPrice) VALUES (?, ?)';
-  db.query(query, [CustomerID, TotalPrice], (err, result) => {
+// GET product by ID
+app.get('/api/products/:id', authenticate, (req, res) => {
+  const { id } = req.params;
+  const query = 'SELECT * FROM Product WHERE ProductID = ?';
+  db.query(query, [id], (err, results) => {
     if (err) {
-      return res.status(500).json({ message: 'Error creating order', error: err });
+      return res.status(500).json({ message: 'Database error', error: err });
     }
-    const OrderID = result.insertId;
-
-    // เพิ่มรายการสินค้าที่สั่งในตาราง order_details
-    CartItems.forEach((item) => {
-      const orderDetailQuery = 'INSERT INTO order_detail (OrderID, ProductID, Quantity, Subtotal) VALUES (?, ?, ?, ?)';
-      db.query(orderDetailQuery, [OrderID, item.ProductID, item.Quantity, item.Subtotal], (err) => {
-        if (err) {
-          return res.status(500).json({ message: 'Error adding order details', error: err });
-        }
-      });
-    });
-
-    res.status(200).json({ message: 'Order created successfully', order_id: OrderID });
+    if (results.length === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+    res.json(results[0]);
   });
 });
 
-app.get('/api/orders/:id', (req, res) => {
-  const OrderID = req.params.id;
-  const query = 'SELECT * FROM orders WHERE OrderID = ?';
-  db.query(query, [OrderID], (err, orderResult) => {
+// POST - Add new product
+app.post('/api/products', authenticate, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+
+  const { ProductName, Description, Price, Stock, CategoryID, ImageURL } = req.body;
+  const query = 'INSERT INTO Product (ProductName, Description, Price, Stock, CategoryID, ImageURL) VALUES (?, ?, ?, ?, ?, ?)';
+  db.query(query, [ProductName, Description, Price, Stock, CategoryID, ImageURL], (err, result) => {
     if (err) {
-      return res.status(500).json({ message: 'Error fetching order', error: err });
+      return res.status(500).json({ message: 'Database error', error: err });
     }
-    if (orderResult.length === 0) {
-      return res.status(404).json({ message: 'Order not found' });
+    res.json({ status: 'success', message: 'Product added successfully' });
+  });
+});
+
+// PUT - Update product by ID
+app.put('/api/products/:id', authenticate, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
+
+  const { id } = req.params;
+  const { ProductName, Price, Stock } = req.body;
+  const query = 'UPDATE Product SET ProductName = ?, Price = ?, Stock = ? WHERE ProductID = ?';
+  db.query(query, [ProductName, Price, Stock, id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: 'Database error', error: err });
+    }
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Product not found' });
     }
     const orderDetailsQuery = 'SELECT * FROM orderdetail WHERE OrderID = ?';
     db.query(orderDetailsQuery, [OrderID], (err, orderDetails) => {
@@ -166,28 +147,26 @@ app.get('/api/orders/:id', (req, res) => {
         order_details: orderDetails
       });
     });
+    res.json({ status: 'success', message: 'Product updated successfully' });
   });
 });
 
-app.post('/api/payments', (req, res) => {
-  const { OrderID, PaymentMethod, Amount } = req.body;
-  const query = 'INSERT INTO payment (OrderID, PaymentMethod, Amount) VALUES (?, ?, ?)';
-  db.query(query, [OrderID, PaymentMethod, Amount], (err, result) => {
-    if (err) {
-      return res.status(500).json({ message: 'Error processing payment', error: err });
-    }
-    res.status(200).json({ message: 'Payment processed successfully', payment_id: result.insertId });
-  });
-});
+// DELETE - Remove product by ID
+app.delete('/api/products/:id', authenticate, (req, res) => {
+  if (req.user.role !== 'admin') {
+    return res.status(403).json({ message: 'Admin access required' });
+  }
 
-app.get('/api/payments/:id', (req, res) => {
-  const PaymentID = req.params.id;
-  const query = 'SELECT * FROM payment WHERE PaymentID = ?';
-  db.query(query, [PaymentID], (err, result) => {
+  const { id } = req.params;
+  const query = 'DELETE FROM Product WHERE ProductID = ?';
+  db.query(query, [id], (err, result) => {
     if (err) {
-      return res.status(500).json({ message: 'Error fetching payment status', error: err });
+      return res.status(500).json({ message: 'Database error', error: err });
     }
-    res.status(200).json(result[0]);
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ message: 'Product not found' });
+    }
+    res.json({ status: 'success', message: 'Product deleted successfully' });
   });
 });
 
