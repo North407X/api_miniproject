@@ -12,17 +12,17 @@ const db = mysql.createConnection({
 
 db.connect((err) => {
   if (err) {
-    console.error("❌ Database Connection Failed: " + err.message);
+    console.error("Database Connection Failed: " + err.message);
     return;
   }
-  console.log("✅ Database Connected...");
+  console.log("Database Connected...");
 });
 
 // ตรวจสอบการเชื่อมต่อใหม่หากมีการตัดการเชื่อมต่อ
 db.on("error", (err) => {
-  console.error("❌ Database Error: " + err.message);
+  console.error("Database Error: " + err.message);
   if (err.code === "PROTOCOL_CONNECTION_LOST") {
-    console.log("🔄 Reconnecting to Database...");
+    console.log("Reconnecting to Database...");
     db.connect();
   } else {
     throw err;
